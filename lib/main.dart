@@ -26,6 +26,7 @@ void main() async {
   runApp(const ExpenseTrackerApp());
 }
 
+
 class ExpenseTrackerApp extends StatelessWidget {
   const ExpenseTrackerApp({super.key});
 
