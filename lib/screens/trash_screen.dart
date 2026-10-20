@@ -126,7 +126,7 @@ class _TrashScreenState extends State<TrashScreen> {
                         ),
                         title: Text(e.title),
                         subtitle: Text(
-                          '${e.category} • ${e.amount.toStringAsFixed(2)} د.ك',
+                          '${e.category} • ${e.amount.toStringAsFixed(2)} ر.ي',
                         ),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,

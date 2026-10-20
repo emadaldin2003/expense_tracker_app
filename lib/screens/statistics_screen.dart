@@ -204,7 +204,7 @@ class _CategoryRow extends StatelessWidget {
               Text(name,
                   style: const TextStyle(fontWeight: FontWeight.w600)),
               Text(
-                '${total.toStringAsFixed(2)} د.ك (${(pct * 100).toStringAsFixed(0)}%)',
+                '${total.toStringAsFixed(2)} ر.ي (${(pct * 100).toStringAsFixed(0)}%)',
                 style: TextStyle(color: scheme.onSurfaceVariant),
               ),
             ],

@@ -157,7 +157,7 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
                   const TextInputType.numberWithOptions(decimal: true),
               decoration: const InputDecoration(
                 labelText: 'المبلغ',
-                prefixText: 'د.ك ',
+                prefixText: 'ر.ي ',
               ),
               validator: (v) {
                 if (v == null || v.trim().isEmpty) {

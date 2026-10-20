@@ -55,7 +55,7 @@ class ExpenseCard extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              '${isExpense ? '-' : '+'}${expense.amount.toStringAsFixed(2)} د.ك',
+              '${isExpense ? '-' : '+'}${expense.amount.toStringAsFixed(2)} ر.ي',
               style: TextStyle(
                 color: color,
                 fontWeight: FontWeight.bold,
