@@ -9,7 +9,6 @@ class DatabaseHelper {
   static Database? _database;
 
   DatabaseHelper._internal();
-
   factory DatabaseHelper() => _instance;
 
   Future<Database> get database async {
@@ -19,10 +18,10 @@ class DatabaseHelper {
   }
 
   Future<Database> _initDatabase() async {
-    String path = join(await getDatabasesPath(), 'expense_tracker.db');
-    return await openDatabase(
+    final path = join(await getDatabasesPath(), 'expense_tracker.db');
+    return openDatabase(
       path,
-      version: 3,
+      version: 4,
       onConfigure: _onConfigure,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
@@ -30,12 +29,10 @@ class DatabaseHelper {
   }
 
   Future<void> _onConfigure(Database db) async {
-    // تفعيل فرض المفاتيح الأجنبية على كل اتصال.
     await db.execute('PRAGMA foreign_keys = ON');
   }
 
   Future<void> _onCreate(Database db, int version) async {
-    // إنشاء جدول المستخدمين
     await db.execute('''
       CREATE TABLE users(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -45,7 +42,6 @@ class DatabaseHelper {
       )
     ''');
 
-    // إنشاء جدول المصروفات مع ربطه بالمستخدم
     await db.execute('''
       CREATE TABLE expenses(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,6 +51,7 @@ class DatabaseHelper {
         category TEXT NOT NULL,
         type TEXT NOT NULL,
         user_id INTEGER NOT NULL,
+        deleted_at TEXT,
         FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
       )
     ''');
@@ -62,147 +59,231 @@ class DatabaseHelper {
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 3) {
-      // v3: كلمات المرور أصبحت مُجزَّأة. البيانات القديمة (نص صريح)
-      // لا يمكن ترحيلها بأمان، لذا نعيد إنشاء الجدولين من الصفر.
-      // ترتيب الحذف مهم بسبب المفتاح الأجنبي: expenses ثم users.
+      // v3: كلمات المرور أصبحت مُجزَّأة — نعيد البناء.
       await db.execute('DROP TABLE IF EXISTS expenses');
       await db.execute('DROP TABLE IF EXISTS users');
       await _onCreate(db, newVersion);
+    } else if (oldVersion < 4) {
+      // v4: إضافة عمود الحذف الناعم دون فقد بيانات.
+      await db.execute('ALTER TABLE expenses ADD COLUMN deleted_at TEXT');
     }
   }
 
-  // دوال إدارة المستخدمين
+  // ============ المستخدمون ============
+
   Future<int> insertUser(User user) async {
-    Database db = await database;
-    return await db.insert('users', user.toMap());
+    final db = await database;
+    return db.insert('users', user.toMap());
   }
 
   Future<User?> getUserByUsername(String username) async {
-    Database db = await database;
-    List<Map<String, dynamic>> maps = await db.query(
+    final db = await database;
+    final maps = await db.query(
       'users',
       where: 'username = ?',
       whereArgs: [username],
     );
-    if (maps.isNotEmpty) {
-      return User.fromMap(maps.first);
-    }
+    if (maps.isNotEmpty) return User.fromMap(maps.first);
     return null;
   }
 
   Future<User?> getUserByEmail(String email) async {
-    Database db = await database;
-    List<Map<String, dynamic>> maps = await db.query(
+    final db = await database;
+    final maps = await db.query(
       'users',
       where: 'email = ?',
       whereArgs: [email],
     );
-    if (maps.isNotEmpty) {
-      return User.fromMap(maps.first);
-    }
+    if (maps.isNotEmpty) return User.fromMap(maps.first);
     return null;
   }
 
-  // دوال المصروفات
+  // ============ المعاملات ============
+
   Future<int> insertExpense(Expense expense, int userId) async {
-    Database db = await database;
-    Map<String, dynamic> expenseMap = expense.toMap();
-    expenseMap['user_id'] = userId;
-    return await db.insert('expenses', expenseMap);
+    final db = await database;
+    final map = expense.toMap();
+    map['user_id'] = userId;
+    return db.insert('expenses', map);
   }
 
-  Future<List<Expense>> getExpenses(int userId) async {
-    Database db = await database;
-    List<Map<String, dynamic>> maps = await db.query(
+  /// يقرأ المعاملات النشطة. يدعم بحثًا نصيًا ونطاقًا زمنيًا.
+  /// [query] يطابق title أو category (LIKE مع parameterized whereArgs).
+  /// [from]/[to] تُقارنان على level اليوم.
+  Future<List<Expense>> getExpenses(
+    int userId, {
+    String? query,
+    DateTime? from,
+    DateTime? to,
+  }) async {
+    final db = await database;
+    final where = StringBuffer('user_id = ? AND deleted_at IS NULL');
+    final whereArgs = <Object>[userId];
+
+    if (query != null && query.trim().isNotEmpty) {
+      final q = '%${query.trim()}%';
+      where.write(' AND (title LIKE ? OR category LIKE ?)');
+      whereArgs.add(q);
+      whereArgs.add(q);
+    }
+    if (from != null) {
+      where.write(' AND date >= ?');
+      whereArgs.add(
+        DateTime(from.year, from.month, from.day).toIso8601String(),
+      );
+    }
+    if (to != null) {
+      where.write(' AND date <= ?');
+      whereArgs.add(
+        DateTime(to.year, to.month, to.day, 23, 59, 59).toIso8601String(),
+      );
+    }
+
+    final maps = await db.query(
       'expenses',
-      where: 'user_id = ?',
-      whereArgs: [userId],
+      where: where.toString(),
+      whereArgs: whereArgs,
       orderBy: 'date DESC',
     );
-    return List.generate(maps.length, (i) => Expense.fromMap(maps[i]));
+    return maps.map(Expense.fromMap).toList();
   }
 
+  /// حذف ناعم: يضع `deleted_at`. المعاملة تصبح في السلة.
   Future<int> deleteExpense(int id) async {
-    Database db = await database;
-    return await db.delete('expenses', where: 'id = ?', whereArgs: [id]);
+    final db = await database;
+    return db.update(
+      'expenses',
+      {'deleted_at': DateTime.now().toIso8601String()},
+      where: 'id = ? AND deleted_at IS NULL',
+      whereArgs: [id],
+    );
+  }
+
+  /// استعادة من السلة.
+  Future<int> restoreExpense(int id) async {
+    final db = await database;
+    return db.update(
+      'expenses',
+      {'deleted_at': null},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  /// حذف نهائي: لا رجعة.
+  Future<int> permanentlyDeleteExpense(int id) async {
+    final db = await database;
+    return db.delete('expenses', where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// المعاملات في السلة، مرتّبة بأحدث حذف.
+  Future<List<Expense>> getTrashedExpenses(int userId) async {
+    final db = await database;
+    final maps = await db.query(
+      'expenses',
+      where: 'user_id = ? AND deleted_at IS NOT NULL',
+      whereArgs: [userId],
+      orderBy: 'deleted_at DESC',
+    );
+    return maps.map(Expense.fromMap).toList();
   }
 
   Future<int> updateExpense(Expense expense) async {
-    Database db = await database;
-    return await db.update(
+    final db = await database;
+    final map = expense.toMap()..remove('deleted_at');
+    return db.update(
       'expenses',
-      expense.toMap(),
-      where: 'id = ?',
+      map,
+      where: 'id = ? AND deleted_at IS NULL',
       whereArgs: [expense.id],
     );
   }
 
   Future<List<Expense>> getExpensesByCategory(
       String category, int userId) async {
-    Database db = await database;
-    List<Map<String, dynamic>> maps = await db.query(
+    final db = await database;
+    final maps = await db.query(
       'expenses',
-      where: 'category = ? AND user_id = ?',
+      where: 'category = ? AND user_id = ? AND deleted_at IS NULL',
       whereArgs: [category, userId],
       orderBy: 'date DESC',
     );
-    return List.generate(maps.length, (i) => Expense.fromMap(maps[i]));
+    return maps.map(Expense.fromMap).toList();
   }
 
   Future<List<Expense>> getExpensesByType(String type, int userId) async {
-    Database db = await database;
-    List<Map<String, dynamic>> maps = await db.query(
+    final db = await database;
+    final maps = await db.query(
       'expenses',
-      where: 'type = ? AND user_id = ?',
+      where: 'type = ? AND user_id = ? AND deleted_at IS NULL',
       whereArgs: [type, userId],
       orderBy: 'date DESC',
     );
-    return List.generate(maps.length, (i) => Expense.fromMap(maps[i]));
+    return maps.map(Expense.fromMap).toList();
   }
 
-  Future<Map<String, dynamic>> getStatistics(int userId) async {
-    Database db = await database;
+  Future<Map<String, dynamic>> getStatistics(
+    int userId, {
+    DateTime? from,
+    DateTime? to,
+  }) async {
+    final db = await database;
+    final where = StringBuffer('deleted_at IS NULL AND user_id = ?');
+    final whereArgs = <Object>[userId];
 
-    // إجمالي المصروفات
+    if (from != null) {
+      where.write(' AND date >= ?');
+      whereArgs.add(
+        DateTime(from.year, from.month, from.day).toIso8601String(),
+      );
+    }
+    if (to != null) {
+      where.write(' AND date <= ?');
+      whereArgs.add(
+        DateTime(to.year, to.month, to.day, 23, 59, 59).toIso8601String(),
+      );
+    }
+    final clause = where.toString();
+
     final expenseResult = await db.rawQuery(
-      'SELECT SUM(amount) as total FROM expenses WHERE type = "expense" AND user_id = ?',
-      [userId],
+      'SELECT SUM(amount) as total FROM expenses WHERE type = "expense" AND $clause',
+      whereArgs,
     );
-    final totalExpenses = expenseResult.first['total'] as num? ?? 0;
+    final totalExpenses =
+        (expenseResult.first['total'] as num? ?? 0).toDouble();
 
-    // إجمالي الإيرادات
     final incomeResult = await db.rawQuery(
-      'SELECT SUM(amount) as total FROM expenses WHERE type = "income" AND user_id = ?',
-      [userId],
+      'SELECT SUM(amount) as total FROM expenses WHERE type = "income" AND $clause',
+      whereArgs,
     );
-    final totalIncome = incomeResult.first['total'] as num? ?? 0;
+    final totalIncome =
+        (incomeResult.first['total'] as num? ?? 0).toDouble();
 
-    // المصروفات حسب الفئة
     final categoryResult = await db.rawQuery(
-      'SELECT category, SUM(amount) as total FROM expenses WHERE type = "expense" AND user_id = ? GROUP BY category',
-      [userId],
+      'SELECT category, SUM(amount) as total FROM expenses WHERE type = "expense" AND $clause GROUP BY category',
+      whereArgs,
     );
 
     return {
-      'totalExpenses': totalExpenses.toDouble(),
-      'totalIncome': totalIncome.toDouble(),
+      'totalExpenses': totalExpenses,
+      'totalIncome': totalIncome,
       'categoryExpenses': categoryResult,
     };
   }
 
   Future<double> getTotalByCategory(String category, int userId) async {
-    Database db = await database;
+    final db = await database;
     final result = await db.rawQuery(
-      'SELECT SUM(amount) as total FROM expenses WHERE category = ? AND type = "expense" AND user_id = ?',
+      'SELECT SUM(amount) as total FROM expenses WHERE category = ? AND type = "expense" AND user_id = ? AND deleted_at IS NULL',
       [category, userId],
     );
     return (result.first['total'] as num? ?? 0).toDouble();
   }
 
   Future<int> getExpensesCount(int userId) async {
-    Database db = await database;
+    final db = await database;
     final result = await db.rawQuery(
-      'SELECT COUNT(*) as count FROM expenses WHERE user_id = ?',
+      'SELECT COUNT(*) as count FROM expenses WHERE user_id = ? AND deleted_at IS NULL',
       [userId],
     );
     return result.first['count'] as int? ?? 0;

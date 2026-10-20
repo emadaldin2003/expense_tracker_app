@@ -4,73 +4,99 @@ import '../models/expense.dart';
 
 class ExpenseCard extends StatelessWidget {
   final Expense expense;
-  final Function onDelete;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
 
   const ExpenseCard({
+    super.key,
     required this.expense,
+    required this.onEdit,
     required this.onDelete,
   });
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isExpense = expense.type == 'expense';
+    final color = isExpense ? scheme.error : Colors.green.shade600;
+
     return Card(
-      margin: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      elevation: 2,
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      elevation: 0,
+      color: scheme.surfaceContainerHighest.withValues(alpha: 0.4),
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(14),
       ),
       child: ListTile(
+        onTap: onEdit,
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
         leading: Container(
-          padding: EdgeInsets.all(8),
+          width: 42,
+          height: 42,
           decoration: BoxDecoration(
-            color: expense.type == 'expense' 
-                ? Colors.red.withOpacity(0.1) 
-                : Colors.green.withOpacity(0.1),
+            color: color.withValues(alpha: 0.15),
             shape: BoxShape.circle,
           ),
           child: Icon(
-            expense.type == 'expense' ? Icons.arrow_downward : Icons.arrow_upward,
-            color: expense.type == 'expense' ? Colors.red : Colors.green,
+            isExpense ? Icons.arrow_downward : Icons.arrow_upward,
+            color: color,
           ),
         ),
         title: Text(
           expense.title,
-          style: TextStyle(fontWeight: FontWeight.bold),
+          style: const TextStyle(fontWeight: FontWeight.w600),
         ),
         subtitle: Text(
-          '${expense.category} - ${expense.date.toLocal().toString().split(' ')[0]}',
-          style: TextStyle(fontSize: 12),
+          '${expense.category} • ${_formatDate(expense.date)}',
+          style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
         ),
-        trailing: Text(
-          '${expense.amount.toStringAsFixed(2)} د.ك',
-          style: TextStyle(
-            color: expense.type == 'expense' ? Colors.red : Colors.green,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        onLongPress: () {
-          showDialog(
-            context: context,
-            builder: (context) => AlertDialog(
-              title: Text('حذف المعاملة'),
-              content: Text('هل تريد حذف هذه المعاملة؟'),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: Text('إلغاء'),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              '${isExpense ? '-' : '+'}${expense.amount.toStringAsFixed(2)} د.ك',
+              style: TextStyle(
+                color: color,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert),
+              onSelected: (v) {
+                if (v == 'edit') onEdit();
+                if (v == 'delete') onDelete();
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem(
+                  value: 'edit',
+                  child: ListTile(
+                    leading: Icon(Icons.edit_outlined),
+                    title: Text('تعديل'),
+                    contentPadding: EdgeInsets.zero,
+                  ),
                 ),
-                TextButton(
-                  onPressed: () {
-                    onDelete();
-                    Navigator.pop(context);
-                  },
-                  child: Text('حذف', style: TextStyle(color: Colors.red)),
+                PopupMenuItem(
+                  value: 'delete',
+                  child: ListTile(
+                    leading: Icon(Icons.delete_outline),
+                    title: Text('حذف'),
+                    contentPadding: EdgeInsets.zero,
+                  ),
                 ),
               ],
             ),
-          );
-        },
+          ],
+        ),
       ),
     );
+  }
+
+  String _formatDate(DateTime d) {
+    final local = d.toLocal();
+    final y = local.year.toString().padLeft(4, '0');
+    final m = local.month.toString().padLeft(2, '0');
+    final day = local.day.toString().padLeft(2, '0');
+    return '$y/$m/$day';
   }
 }

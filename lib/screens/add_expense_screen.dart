@@ -5,11 +5,16 @@ import '../models/expense.dart';
 
 class AddExpenseScreen extends StatefulWidget {
   final int userId;
+  final Expense? expense; // null = إنشاء جديد
 
-  AddExpenseScreen({required this.userId});
+  const AddExpenseScreen({
+    super.key,
+    required this.userId,
+    this.expense,
+  });
 
   @override
-  _AddExpenseScreenState createState() => _AddExpenseScreenState();
+  State<AddExpenseScreen> createState() => _AddExpenseScreenState();
 }
 
 class _AddExpenseScreenState extends State<AddExpenseScreen> {
@@ -21,166 +26,33 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
   DateTime _selectedDate = DateTime.now();
   String _selectedCategory = 'طعام';
   String _selectedType = 'expense';
+  bool _saving = false;
 
-  final List<String> _categories = [
+  final List<String> _categories = const [
     'طعام',
     'مواصلات',
     'ترفيه',
     'سكن',
     'صحة',
     'تعليم',
-    'أخرى'
+    'أخرى',
   ];
 
-  Future<void> _selectDate() async {
-    final DateTime? picked = await showDatePicker(
-      context: context,
-      initialDate: _selectedDate,
-      firstDate: DateTime(2020),
-      lastDate: DateTime.now(),
-    );
-    if (picked != null && picked != _selectedDate) {
-      setState(() {
-        _selectedDate = picked;
-      });
-    }
-  }
-
-  Future<void> _saveExpense() async {
-    if (!_formKey.currentState!.validate()) return;
-
-    final expense = Expense(
-      title: _titleController.text.trim(),
-      amount: double.parse(_amountController.text.trim()),
-      date: _selectedDate,
-      category: _selectedCategory,
-      type: _selectedType,
-    );
-
-    try {
-      await _dbHelper.insertExpense(expense, widget.userId);
-      if (!mounted) return;
-      Navigator.pop(context);
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('تعذر حفظ المعاملة، حاول مجددًا'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
-  }
+  bool get _isEdit => widget.expense != null;
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('إضافة معاملة جديدة'),
-        backgroundColor: Colors.blue,
-      ),
-      body: Padding(
-        padding: EdgeInsets.all(16),
-        child: Form(
-          key: _formKey,
-          child: ListView(
-            children: [
-              // نوع المعاملة
-              DropdownButtonFormField<String>(
-                value: _selectedType,
-                items: [
-                  DropdownMenuItem(value: 'expense', child: Text('مصروف')),
-                  DropdownMenuItem(value: 'income', child: Text('إيراد')),
-                ],
-                onChanged: (value) {
-                  setState(() {
-                    _selectedType = value!;
-                  });
-                },
-                decoration: InputDecoration(
-                  labelText: 'نوع المعاملة',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              SizedBox(height: 16),
-              // العنوان
-              TextFormField(
-                controller: _titleController,
-                decoration: InputDecoration(
-                  labelText: 'الوصف',
-                  border: OutlineInputBorder(),
-                ),
-                validator: (value) {
-                  if (value == null || value.trim().isEmpty) {
-                    return 'يرجى إدخال وصف للمعاملة';
-                  }
-                  return null;
-                },
-              ),
-              SizedBox(height: 16),
-              // المبلغ
-              TextFormField(
-                controller: _amountController,
-                keyboardType: TextInputType.number,
-                decoration: InputDecoration(
-                  labelText: 'المبلغ',
-                  border: OutlineInputBorder(),
-                  prefixText: 'د.ك ',
-                ),
-                validator: (value) {
-                  if (value == null || value.trim().isEmpty) {
-                    return 'يرجى إدخال المبلغ';
-                  }
-                  if (double.tryParse(value.trim()) == null) {
-                    return 'يرجى إدخال رقم صحيح';
-                  }
-                  return null;
-                },
-              ),
-              SizedBox(height: 16),
-              // الفئة
-              DropdownButtonFormField<String>(
-                value: _selectedCategory,
-                items: _categories.map((category) {
-                  return DropdownMenuItem(
-                    value: category,
-                    child: Text(category),
-                  );
-                }).toList(),
-                onChanged: (value) {
-                  setState(() {
-                    _selectedCategory = value!;
-                  });
-                },
-                decoration: InputDecoration(
-                  labelText: 'الفئة',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              SizedBox(height: 16),
-              // التاريخ
-              ListTile(
-                title: Text(
-                  'التاريخ: ${_selectedDate.toLocal().toString().split(' ')[0]}',
-                ),
-                trailing: Icon(Icons.calendar_today),
-                onTap: _selectDate,
-              ),
-              SizedBox(height: 24),
-              // زر الحفظ
-              ElevatedButton(
-                onPressed: _saveExpense,
-                child: Text('حفظ المعاملة'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blue,
-                  padding: EdgeInsets.symmetric(vertical: 16),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+  void initState() {
+    super.initState();
+    final e = widget.expense;
+    if (e != null) {
+      _titleController.text = e.title;
+      _amountController.text = e.amount.toString();
+      _selectedDate = e.date;
+      _selectedCategory = _categories.contains(e.category)
+          ? e.category
+          : 'أخرى';
+      _selectedType = e.type;
+    }
   }
 
   @override
@@ -188,5 +60,156 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
     _titleController.dispose();
     _amountController.dispose();
     super.dispose();
+  }
+
+  Future<void> _selectDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now(),
+    );
+    if (picked != null && picked != _selectedDate) {
+      setState(() => _selectedDate = picked);
+    }
+  }
+
+  Future<void> _saveExpense() async {
+    if (!_formKey.currentState!.validate()) return;
+    if (_saving) return;
+    setState(() => _saving = true);
+
+    final title = _titleController.text.trim();
+    final amount = double.parse(_amountController.text.trim());
+
+    try {
+      if (_isEdit) {
+        await _dbHelper.updateExpense(
+          widget.expense!.copyWith(
+            title: title,
+            amount: amount,
+            date: _selectedDate,
+            category: _selectedCategory,
+            type: _selectedType,
+          ),
+        );
+      } else {
+        final expense = Expense(
+          title: title,
+          amount: amount,
+          date: _selectedDate,
+          category: _selectedCategory,
+          type: _selectedType,
+        );
+        await _dbHelper.insertExpense(expense, widget.userId);
+      }
+      if (!mounted) return;
+      Navigator.pop(context, true);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_isEdit
+              ? 'تعذر تحديث المعاملة'
+              : 'تعذر حفظ المعاملة'),
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dateStr = _selectedDate.toLocal().toString().split(' ')[0];
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(_isEdit ? 'تعديل معاملة' : 'إضافة معاملة جديدة'),
+      ),
+      body: Form(
+        key: _formKey,
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            DropdownButtonFormField<String>(
+              initialValue: _selectedType,
+              items: const [
+                DropdownMenuItem(value: 'expense', child: Text('مصروف')),
+                DropdownMenuItem(value: 'income', child: Text('إيراد')),
+              ],
+              onChanged: (v) => setState(() => _selectedType = v!),
+              decoration: const InputDecoration(labelText: 'نوع المعاملة'),
+            ),
+            const SizedBox(height: 16),
+            TextFormField(
+              controller: _titleController,
+              decoration: const InputDecoration(labelText: 'الوصف'),
+              validator: (v) {
+                if (v == null || v.trim().isEmpty) {
+                  return 'يرجى إدخال وصف للمعاملة';
+                }
+                return null;
+              },
+            ),
+            const SizedBox(height: 16),
+            TextFormField(
+              controller: _amountController,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                labelText: 'المبلغ',
+                prefixText: 'د.ك ',
+              ),
+              validator: (v) {
+                if (v == null || v.trim().isEmpty) {
+                  return 'يرجى إدخال المبلغ';
+                }
+                final parsed = double.tryParse(v.trim());
+                if (parsed == null || parsed <= 0) {
+                  return 'يرجى إدخال مبلغ صحيح أكبر من صفر';
+                }
+                return null;
+              },
+            ),
+            const SizedBox(height: 16),
+            DropdownButtonFormField<String>(
+              initialValue: _selectedCategory,
+              items: _categories
+                  .map((c) =>
+                      DropdownMenuItem(value: c, child: Text(c)))
+                  .toList(),
+              onChanged: (v) => setState(() => _selectedCategory = v!),
+              decoration: const InputDecoration(labelText: 'الفئة'),
+            ),
+            const SizedBox(height: 16),
+            InkWell(
+              onTap: _selectDate,
+              borderRadius: BorderRadius.circular(12),
+              child: InputDecorator(
+                decoration: const InputDecoration(
+                  labelText: 'التاريخ',
+                  suffixIcon: Icon(Icons.calendar_today_outlined),
+                ),
+                child: Text(dateStr),
+              ),
+            ),
+            const SizedBox(height: 24),
+            SizedBox(
+              height: 48,
+              child: FilledButton.icon(
+                onPressed: _saving ? null : _saveExpense,
+                icon: _saving
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Icon(_isEdit ? Icons.save : Icons.check),
+                label: Text(_isEdit ? 'تحديث المعاملة' : 'حفظ المعاملة'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
